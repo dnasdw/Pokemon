@@ -15,14 +15,14 @@ struct SGarcHeader
 
 struct SGarcHeader0400 : public SGarcHeader
 {
-	u32 Unknown0x18;
+	u32 SubFileSizeMax;
 } SDW_GNUC_PACKED;
 
 struct SGarcHeader0600 : public SGarcHeader
 {
-	u32 Unknown0x18;
-	u32 Unknown0x1C;
-	u32 Unknown0x20;
+	u32 SubFileSizeMaxAligned;
+	u32 SubFileSizeMax;
+	u32 Alignment;
 } SDW_GNUC_PACKED;
 
 struct SFatoHeader
@@ -49,7 +49,7 @@ struct SFileRecord
 
 struct SFatbRecord
 {
-	u32 IndexSet;
+	u32 NumSet;
 	SFileRecord FileRecord[1];
 } SDW_GNUC_PACKED;
 
@@ -134,6 +134,28 @@ int unpackGarc(const UChar* a_pFileName, const UChar* a_pDirName)
 	vector<u8> vGarcHeader(pGarcHeader->HeaderSize);
 	fread(&*vGarcHeader.begin(), 1, pGarcHeader->HeaderSize, fp);
 	pGarcHeader = reinterpret_cast<SGarcHeader*>(&*vGarcHeader.begin());
+	u32 uAlignment = 0;
+	u32 uSubFileSizeMaxAligned = 0;
+	if (pGarcHeader->Version == 0x0400)
+	{
+		uAlignment = 4;
+		uSubFileSizeMaxAligned = static_cast<u32>(Align(reinterpret_cast<SGarcHeader0400*>(pGarcHeader)->SubFileSizeMax, uAlignment));
+	}
+	else if (pGarcHeader->Version == 0x0600)
+	{
+		uAlignment = reinterpret_cast<SGarcHeader0600*>(pGarcHeader)->Alignment;
+		if (uAlignment == 0)
+		{
+			fclose(fp);
+			return 1;
+		}
+		uSubFileSizeMaxAligned = static_cast<u32>(Align(reinterpret_cast<SGarcHeader0600*>(pGarcHeader)->SubFileSizeMax, uAlignment));
+		if (uSubFileSizeMaxAligned != reinterpret_cast<SGarcHeader0600*>(pGarcHeader)->SubFileSizeMaxAligned)
+		{
+			fclose(fp);
+			return 1;
+		}
+	}
 	SFatoHeader fatoHeader;
 	fread(&fatoHeader, sizeof(SFatoHeader), 1, fp);
 	SFatoHeader* pFatoHeader = &fatoHeader;
@@ -156,7 +178,7 @@ int unpackGarc(const UChar* a_pFileName, const UChar* a_pDirName)
 	vector<u8> vFato(pFatoHeader->Size);
 	fread(&*vFato.begin(), 1, pFatoHeader->Size, fp);
 	pFatoHeader = reinterpret_cast<SFatoHeader*>(&*vFato.begin());
-	u32* pFatoOffset = reinterpret_cast<u32*>(pFatoHeader + 1);
+	u32* pFatbOffset = reinterpret_cast<u32*>(pFatoHeader + 1);
 	SFatbHeader fatbHeader;
 	fread(&fatbHeader, sizeof(SFatbHeader), 1, fp);
 	SFatbHeader* pFatbHeader = &fatbHeader;
@@ -187,7 +209,61 @@ int unpackGarc(const UChar* a_pFileName, const UChar* a_pDirName)
 		fclose(fp);
 		return 1;
 	}
+	u32 uSubFileSizeMax = 0;
+	u32 uPrevOffset = 0;
+	for (n32 i = 0; i < pFatoHeader->Count; i++)
+	{
+		SFatbRecord* pFatbRecord = reinterpret_cast<SFatbRecord*>(&*vFatb.begin() + sizeof(SFatbHeader) + pFatbOffset[i]);
+		bitset<32> bsNum(pFatbRecord->NumSet);
+		if (bsNum.none())
+		{
+			fclose(fp);
+			return 1;
+		}
+		n32 nIndex = 0;
+		for (n32 j = 0; j < 32; j++)
+		{
+			if (bsNum[j] != 0)
+			{
+				SFileRecord* pFileRecord = &pFatbRecord->FileRecord[nIndex++];
+				if (pFileRecord->Size == 0 && pFileRecord->EndOffset != pFileRecord->BeginOffset)
+				{
+					fclose(fp);
+					return 1;
+				}
+				if (static_cast<u32>(Align(pFileRecord->BeginOffset + pFileRecord->Size, uAlignment)) != pFileRecord->EndOffset)
+				{
+					fclose(fp);
+					return 1;
+				}
+				if (pFileRecord->BeginOffset != uPrevOffset)
+				{
+					fclose(fp);
+					return 1;
+				}
+				uPrevOffset = pFileRecord->EndOffset;
+				if (pFileRecord->Size > uSubFileSizeMax)
+				{
+					uSubFileSizeMax = pFileRecord->Size;
+				}
+			}
+		}
+	}
 	fclose(fp);
+	if (pGarcHeader->Version == 0x0400)
+	{
+		if (reinterpret_cast<SGarcHeader0400*>(pGarcHeader)->SubFileSizeMax != uSubFileSizeMax)
+		{
+			return 1;
+		}
+	}
+	else if (pGarcHeader->Version == 0x0600)
+	{
+		if (reinterpret_cast<SGarcHeader0600*>(pGarcHeader)->SubFileSizeMax != uSubFileSizeMax)
+		{
+			return 1;
+		}
+	}
 	return 0;
 }
 
