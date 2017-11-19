@@ -133,6 +133,10 @@ const char* getExt(const UString& a_sPath, const u8* a_pData, u32 a_uDataSize)
 	{
 		return "cwar";
 	}
+	if (uExtU32 == SDW_CONVERT_ENDIAN32('DARC'))
+	{
+		return "darc";
+	}
 	if (uExtU32 == SDW_CONVERT_ENDIAN32('DVLB'))
 	{
 		return "shbin";
@@ -144,6 +148,10 @@ const char* getExt(const UString& a_sPath, const u8* a_pData, u32 a_uDataSize)
 	if (uExtU32 == SDW_CONVERT_ENDIAN32('GFBE'))
 	{
 		return "gfbe";
+	}
+	if (uExtU32 == SDW_CONVERT_ENDIAN32('SARC'))
+	{
+		return "sarc";
 	}
 	if (uExtU32 == SDW_CONVERT_ENDIAN32('SESD'))
 	{
